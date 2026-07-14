@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nextfit-app
+  namespace: nextfit
+  labels:
+    app: nextfit-app
+spec:
+  type: ClusterIP
+  selector:
+    app: nextfit-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

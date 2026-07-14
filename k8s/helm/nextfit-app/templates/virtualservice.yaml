@@ -1,0 +1,22 @@
+{{- if .Values.istio.enabled }}
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: nextfit-app
+  labels:
+    app: nextfit-app
+spec:
+  hosts:
+    - {{ .Values.istio.host | quote }}
+  gateways:
+    - {{ .Values.istio.gatewayName }}
+  http:
+    - match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: nextfit-app.nextfit.svc.cluster.local
+            port:
+              number: {{ .Values.service.port }}
+{{- end }}
