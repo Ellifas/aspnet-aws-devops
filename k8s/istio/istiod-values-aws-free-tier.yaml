@@ -1,0 +1,21 @@
+pilot:
+  replicaCount: 1
+  autoscaleEnabled: false
+
+  resources:
+    requests:
+      cpu: 25m
+      memory: 96Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi
+
+global:
+  proxy:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 48Mi
+      limits:
+        cpu: 200m
+        memory: 192Mi

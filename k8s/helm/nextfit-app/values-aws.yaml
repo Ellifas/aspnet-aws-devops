@@ -1,0 +1,8 @@
+image:
+  repository: replace-with-ecr-url
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+istio:
+  enabled: true
+  host: "*"

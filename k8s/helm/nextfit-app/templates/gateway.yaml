@@ -4,7 +4,7 @@ kind: Gateway
 metadata:
   name: {{ .Values.istio.gatewayName }}
   labels:
-    app: nextfit-app
+    {{- include "nextfit-app.labels" . | nindent 4 }}
 spec:
   selector:
     {{- toYaml .Values.istio.gatewaySelector | nindent 4 }}

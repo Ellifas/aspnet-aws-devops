@@ -1,13 +1,13 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nextfit-app
+  name: {{ include "nextfit-app.fullname" . }}
   labels:
-    app: nextfit-app
+    {{- include "nextfit-app.labels" . | nindent 4 }}
 spec:
-  {{- if not .Values.autoscaling.enabled }}
+{{- if not .Values.hpa.enabled }}
   replicas: {{ .Values.replicaCount }}
-  {{- end }}
+{{- end }}
   revisionHistoryLimit: 3
   strategy:
     type: RollingUpdate
@@ -16,11 +16,11 @@ spec:
       maxSurge: 1
   selector:
     matchLabels:
-      app: nextfit-app
+      {{- include "nextfit-app.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app: nextfit-app
+        {{- include "nextfit-app.selectorLabels" . | nindent 8 }}
     spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
@@ -31,6 +31,7 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.containerPort }}
+              protocol: TCP
           env:
             - name: ASPNETCORE_URLS
               value: "http://+:{{ .Values.containerPort }}"

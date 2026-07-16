@@ -1,18 +1,15 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: nextfit-app
+  name: {{ include "nextfit-app.fullname" . }}
   labels:
-    app: nextfit-app
+    {{- include "nextfit-app.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
   selector:
-    app: nextfit-app
+    {{- include "nextfit-app.selectorLabels" . | nindent 4 }}
   ports:
     - name: http
       port: {{ .Values.service.port }}
       targetPort: http
       protocol: TCP
-      {{- if eq .Values.service.type "NodePort" }}
-      nodePort: {{ .Values.service.nodePort }}
-      {{- end }}

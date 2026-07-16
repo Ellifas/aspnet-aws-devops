@@ -1,675 +1,855 @@
 # NextFit DevOps Challenge
 
-Este projeto foi desenvolvido como parte de um desafio técnico DevOps/Cloud, com o objetivo de demonstrar provisionamento, containerização, deploy em Kubernetes, exposição HTTP e boas práticas básicas de operação.
+Projeto desenvolvido para o desafio técnico de DevOps, com foco em provisionamento de infraestrutura em cloud, containerização, deploy em Kubernetes, exposição HTTP e boas práticas operacionais.
 
-A solução foi construída de forma incremental para validar cada camada antes de avançar para cloud:
-
-1. Aplicação ASP.NET Core 8.
-2. Dockerfile multi-stage.
-3. Deploy em Kubernetes local com K3s.
-4. Empacotamento com Helm.
-5. Probes, requests, limits e securityContext.
-6. HPA e PDB.
-7. Exposição HTTP via Istio Gateway.
-8. Próxima etapa: provisionamento e deploy em AWS com Terraform, EKS e ECR.
+A aplicação utilizada é uma API ASP.NET Core 8 containerizada com Docker, publicada no Amazon ECR e implantada em um cluster Amazon EKS provisionado com Terraform. A exposição pública foi realizada com Istio Ingress Gateway, utilizando `Gateway` e `VirtualService` para rotear o tráfego até a aplicação.
 
 ---
 
-## 1. Objetivo da solução
+## Arquitetura
 
-O objetivo é publicar uma aplicação ASP.NET Core em um cluster Kubernetes, deixando-a acessível por HTTP e demonstrando uma estrutura organizada de infraestrutura, deploy e operação.
-
-A solução local usa K3s para validação prática dos manifests e do Helm Chart. A versão final do desafio será evoluída para AWS, usando Terraform para provisionar a infraestrutura e EKS como cluster Kubernetes gerenciado.
-
----
-
-## 2. Arquitetura atual — ambiente local
+Fluxo principal da solução:
 
 ```text
-Usuário
-  |
-  v
-http://192.168.0.20:30080
-  |
-  v
+Internet
+  ↓
+AWS Load Balancer
+  ↓
 Istio Ingress Gateway
-  |
-  v
+  ↓
 Istio Gateway
-  |
-  v
-VirtualService
-  |
-  v
-Service ClusterIP nextfit-app
-  |
-  v
-Pods ASP.NET Core
+  ↓
+Istio VirtualService
+  ↓
+Kubernetes Service ClusterIP
+  ↓
+Pod ASP.NET Core
+  ↓
+Imagem Docker publicada no Amazon ECR
 ```
 
-A aplicação não é exposta diretamente. O Service da aplicação permanece como `ClusterIP`, e a entrada HTTP é feita pelo `istio-ingressgateway`.
+Componentes utilizados:
+
+```text
+Terraform  -> provisionamento da infraestrutura AWS
+AWS VPC    -> rede do cluster
+Amazon EKS -> cluster Kubernetes gerenciado
+Amazon ECR -> registry privado da imagem Docker
+Docker     -> build da aplicação ASP.NET Core
+Helm       -> empacotamento e deploy da aplicação
+Istio      -> ingress gateway e roteamento HTTP
+Kubernetes -> Deployment, Service, probes e recursos
+```
 
 ---
 
-## 3. Stack utilizada
-
-* ASP.NET Core 8
-* Docker
-* Kubernetes
-* K3s
-* Helm
-* Istio
-* HPA
-* PDB
-* Terraform, na próxima etapa AWS
-* AWS EKS/ECR, na próxima etapa AWS
-
----
-
-## 4. Estrutura do projeto
+## Estrutura do projeto
 
 ```text
 nextfit-devops-challenge/
 ├── app/
 │   └── NextFit.App/
+│       ├── Dockerfile
 │       ├── Program.cs
 │       ├── NextFit.App.csproj
-│       ├── Dockerfile
-│       └── .dockerignore
+│       ├── appsettings.json
+│       └── appsettings.Development.json
+│
+├── infra/
+│   └── infra/
+│       └── aws/
+│           ├── main.tf
+│           ├── outputs.tf
+│           ├── providers.tf
+│           ├── variables.tf
+│           ├── versions.tf
+│           ├── terraform.tfvars.example
+│           └── terraform.tfvars
+│
 ├── k8s/
 │   ├── helm/
 │   │   └── nextfit-app/
 │   │       ├── Chart.yaml
 │   │       ├── values.yaml
+│   │       ├── values-local.yaml
+│   │       ├── values-aws.yaml
+│   │       ├── values-aws-free-tier.yaml
+│   │       ├── values-aws-istio-free-tier.yaml
 │   │       └── templates/
-│   │           ├── deployment.yaml
-│   │           ├── service.yaml
-│   │           ├── hpa.yaml
-│   │           ├── pdb.yaml
-│   │           ├── gateway.yaml
-│   │           └── virtualservice.yaml
-│   ├── istio/
-│   │   └── ingressgateway-values.yaml
-│   └── manifests/
-│       ├── namespace.yaml
-│       ├── deployment.yaml
-│       └── service.yaml
+│   │
+│   └── istio/
+│       ├── ingressgateway-values-local.yaml
+│       ├── ingressgateway-values-aws.yaml
+│       ├── ingressgateway-values-aws-free-tier.yaml
+│       ├── ingressgateway-values-aws-public-free-tier.yaml
+│       └── istiod-values-aws-free-tier.yaml
+│
+├── .gitignore
 └── README.md
 ```
 
+> Observação: durante a execução do desafio, a infraestrutura Terraform ficou em `infra/infra/aws`. Em uma organização futura, esse diretório poderia ser simplificado para `infra/aws`, mas a estrutura atual foi mantida para evitar alterações em um ambiente já validado.
+
 ---
 
-## 5. Aplicação ASP.NET Core
+## Aplicação
 
-A aplicação é uma Minimal API em ASP.NET Core 8.
+A aplicação foi desenvolvida em ASP.NET Core 8 e expõe os seguintes endpoints:
 
-Endpoints disponíveis:
-
-```text
+```http
 GET /
 GET /version
 GET /health/live
 GET /health/ready
 ```
 
-O endpoint `/` retorna uma resposta básica informando que a aplicação está em execução.
+Exemplo de resposta do endpoint `/`:
 
-Os endpoints `/health/live` e `/health/ready` são utilizados pelas probes do Kubernetes.
+```json
+{
+  "service": "nextfit-challenge",
+  "status": "running",
+  "environment": "Production",
+  "timestampUtc": "2026-07-16T06:04:47.6581653Z"
+}
+```
+
+Endpoint de versão:
+
+```json
+{
+  "application": "NextFit.App",
+  "framework": ".NET 8",
+  "version": "0.1.0"
+}
+```
+
+Endpoint de readiness:
+
+```text
+Healthy
+```
 
 ---
 
-## 6. Executar aplicação localmente
+## Docker
 
-Entre na pasta da aplicação:
+A aplicação possui um `Dockerfile` multi-stage build, utilizando:
+
+```text
+mcr.microsoft.com/dotnet/sdk:8.0-alpine
+mcr.microsoft.com/dotnet/aspnet:8.0-alpine
+```
+
+Boas práticas aplicadas no container:
+
+```text
+- imagem baseada em Alpine
+- multi-stage build
+- execução com usuário não-root
+- porta interna 8080
+- publicação em modo Release
+```
+
+Build local:
 
 ```bash
 cd app/NextFit.App
+
+docker build -t nextfit-app:local .
 ```
 
-Execute:
+Execução local:
 
 ```bash
-dotnet run
+docker run --rm -p 8080:8080 nextfit-app:local
 ```
 
-Teste:
+Teste local:
 
 ```bash
-curl http://localhost:PORTA/
-curl http://localhost:PORTA/version
-curl http://localhost:PORTA/health/live
-curl http://localhost:PORTA/health/ready
+curl http://localhost:8080/
+curl http://localhost:8080/version
+curl http://localhost:8080/health/ready
 ```
 
 ---
 
-## 7. Build da imagem Docker
+## Infraestrutura AWS com Terraform
 
-Na raiz do projeto:
+A infraestrutura foi provisionada com Terraform.
 
-```bash
-sudo docker build -t nextfit-app:local ./app/NextFit.App
-```
-
-Crie também uma tag compatível com o K3s/containerd:
-
-```bash
-sudo docker tag nextfit-app:local localhost/nextfit-app:local
-```
-
-Salve a imagem:
-
-```bash
-sudo docker save -o /var/tmp/nextfit-app-local.tar localhost/nextfit-app:local
-```
-
-Importe para o K3s:
-
-```bash
-sudo k3s ctr -n k8s.io images import /var/tmp/nextfit-app-local.tar
-```
-
-Valide:
-
-```bash
-sudo k3s ctr -n k8s.io images list | grep nextfit
-```
-
----
-
-## 8. Dockerfile
-
-A aplicação utiliza Dockerfile multi-stage:
-
-* A primeira etapa usa a imagem SDK do .NET 8 para restaurar dependências e publicar a aplicação.
-* A segunda etapa usa apenas a imagem runtime do ASP.NET 8.
-* A aplicação roda como usuário não-root.
-* A porta interna usada é `8080`.
-
-Essa abordagem reduz o tamanho da imagem final e evita levar ferramentas de build para o runtime.
-
----
-
-## 9. Deploy com Helm
-
-O deploy da aplicação é feito via Helm Chart.
-
-Criar namespace:
-
-```bash
-kubectl create namespace nextfit --dry-run=client -o yaml | kubectl apply -f -
-```
-
-Instalar ou atualizar a aplicação:
-
-```bash
-helm upgrade --install nextfit-app k8s/helm/nextfit-app -n nextfit
-```
-
-Validar release:
-
-```bash
-helm list -n nextfit
-helm status nextfit-app -n nextfit
-```
-
-Validar recursos:
-
-```bash
-kubectl -n nextfit get pods
-kubectl -n nextfit get svc
-kubectl -n nextfit get hpa
-kubectl -n nextfit get pdb
-```
-
----
-
-## 10. Boas práticas aplicadas no Kubernetes
-
-O Deployment da aplicação possui:
-
-* 2 réplicas.
-* Estratégia `RollingUpdate`.
-* `livenessProbe`.
-* `readinessProbe`.
-* `resources.requests`.
-* `resources.limits`.
-* `securityContext`.
-* Execução como usuário não-root.
-* `allowPrivilegeEscalation: false`.
-* Linux capabilities removidas.
-* `readOnlyRootFilesystem`.
-* Volume temporário em `/tmp`.
-
-Essas configurações ajudam a tornar o deploy mais previsível, seguro e resiliente.
-
----
-
-## 11. HPA
-
-A aplicação possui `HorizontalPodAutoscaler`.
-
-Configuração atual:
+Recursos criados:
 
 ```text
-minReplicas: 2
-maxReplicas: 4
-cpuUtilization: 70%
+- VPC
+- Subnets públicas
+- Subnets privadas
+- NAT Gateway
+- Amazon EKS
+- Managed Node Group
+- Amazon ECR
+- Security Groups
+- Add-ons básicos do EKS
 ```
 
-Validar:
+Diretório da infraestrutura:
 
 ```bash
-kubectl -n nextfit get hpa
-kubectl top pods -n nextfit
+cd infra/infra/aws
 ```
 
-O HPA permite escalar horizontalmente a aplicação com base no consumo médio de CPU.
+Inicialização:
 
-Em produção, seria interessante avaliar métricas mais aderentes ao comportamento real da aplicação, como latência, requisições por segundo, tamanho de fila ou métricas customizadas via Prometheus Adapter.
+```bash
+terraform init
+```
+
+Validação:
+
+```bash
+terraform validate
+```
+
+Planejamento:
+
+```bash
+terraform plan
+```
+
+Aplicação:
+
+```bash
+terraform apply
+```
+
+Configuração do kubeconfig:
+
+```bash
+aws eks update-kubeconfig \
+  --region us-east-1 \
+  --name nextfit-challenge-dev
+```
 
 ---
 
-## 12. PDB
+## Ajustes para Free Tier
 
-A aplicação possui `PodDisruptionBudget`.
+O ambiente foi executado com restrições de Free Tier da AWS. Por isso, foram aplicados ajustes de sizing para reduzir consumo de CPU, memória e quantidade de pods.
 
-Configuração atual:
+Configuração utilizada no Managed Node Group:
+
+```hcl
+node_instance_types = ["t3.micro"]
+node_min_size       = 1
+node_desired_size   = 2
+node_max_size       = 2
+```
+
+Ajustes aplicados:
 
 ```text
-minAvailable: 1
+- 2 nodes t3.micro
+- CoreDNS com 1 réplica
+- aplicação com 1 réplica
+- HPA desabilitado no ambiente AWS Free Tier
+- PDB desabilitado no ambiente AWS Free Tier
+- remoção do eks-pod-identity-agent, pois não havia Pod Identity Association em uso
+- Istio com requests/limits reduzidos
+- Istio Ingress Gateway com 1 réplica
 ```
 
-Validar:
+Essas decisões foram tomadas para manter a solução executável dentro das limitações do ambiente de teste.
 
-```bash
-kubectl -n nextfit get pdb
+Em produção, a recomendação seria:
+
+```text
+- nodes maiores
+- múltiplas réplicas da aplicação
+- múltiplas réplicas do CoreDNS
+- HPA habilitado
+- PDB habilitado
+- Istio com alta disponibilidade
+- Load Balancer com configuração produtiva
+- observabilidade completa
+- state remoto do Terraform em S3 com lock em DynamoDB
 ```
-
-O PDB evita que todos os pods da aplicação sejam removidos ao mesmo tempo durante operações voluntárias, como drain de node ou manutenção controlada.
 
 ---
 
-## 13. Istio
+## Amazon ECR
 
-O Istio foi utilizado para expor a aplicação via Gateway e VirtualService.
+A imagem da aplicação foi publicada no Amazon ECR.
+
+Repositório utilizado:
+
+```text
+879816410626.dkr.ecr.us-east-1.amazonaws.com/nextfit-challenge-dev/nextfit-app
+```
+
+Login no ECR:
+
+```bash
+aws ecr get-login-password --region us-east-1 \
+  | docker login --username AWS --password-stdin 879816410626.dkr.ecr.us-east-1.amazonaws.com
+```
+
+Build da imagem:
+
+```bash
+docker build --platform linux/amd64 \
+  -t nextfit-app:0.1.0 \
+  ./app/NextFit.App
+```
+
+Tag da imagem:
+
+```bash
+docker tag nextfit-app:0.1.0 \
+  879816410626.dkr.ecr.us-east-1.amazonaws.com/nextfit-challenge-dev/nextfit-app:0.1.0
+```
+
+Push para o ECR:
+
+```bash
+docker push \
+  879816410626.dkr.ecr.us-east-1.amazonaws.com/nextfit-challenge-dev/nextfit-app:0.1.0
+```
+
+Imagem utilizada no EKS:
+
+```text
+879816410626.dkr.ecr.us-east-1.amazonaws.com/nextfit-challenge-dev/nextfit-app:0.1.0
+```
+
+---
+
+## Deploy com Helm
+
+A aplicação foi empacotada em um Helm Chart.
+
+Diretório do chart:
+
+```text
+k8s/helm/nextfit-app
+```
+
+Deploy no EKS com Istio:
+
+```bash
+helm upgrade --install nextfit-app k8s/helm/nextfit-app \
+  -n nextfit \
+  --create-namespace \
+  -f k8s/helm/nextfit-app/values-aws-istio-free-tier.yaml
+```
+
+Validação:
+
+```bash
+kubectl -n nextfit get deploy,pod,svc -o wide
+```
+
+Resultado validado:
+
+```text
+deployment.apps/nextfit-app   1/1
+pod/nextfit-app               1/1 Running
+service/nextfit-app           ClusterIP
+```
+
+A aplicação ficou exposta internamente via Service `ClusterIP`:
+
+```text
+service/nextfit-app   ClusterIP   172.20.178.42   <none>   80/TCP
+```
+
+Endpoint interno:
+
+```text
+nextfit-app   10.42.21.197:8080
+```
+
+---
+
+## Boas práticas Kubernetes
+
+O Deployment da aplicação inclui:
+
+```text
+- livenessProbe
+- readinessProbe
+- resources.requests
+- resources.limits
+- securityContext
+- execução como usuário não-root
+- readOnlyRootFilesystem
+- capabilities drop ALL
+```
+
+Exemplo de probes:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: http
+
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+```
+
+Exemplo de resources:
+
+```yaml
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+```
+
+No ambiente AWS Free Tier, os valores foram ajustados para viabilizar a execução com `t3.micro`.
+
+---
+
+## Istio
+
+O Istio foi utilizado como diferencial para exposição da aplicação.
 
 Componentes instalados:
 
 ```text
-istio-base
-istiod
-istio-ingressgateway
+- istio-base
+- istiod
+- istio-ingressgateway
 ```
 
-Namespaces utilizados:
+Instalação do `istio-base`:
 
-```text
-istio-system
-istio-ingress
-nextfit
+```bash
+helm upgrade --install istio-base istio/base \
+  -n istio-system \
+  --wait \
+  --timeout 5m
 ```
 
-Validar Istio:
+Instalação do `istiod`:
+
+```bash
+helm upgrade --install istiod istio/istiod \
+  -n istio-system \
+  -f k8s/istio/istiod-values-aws-free-tier.yaml \
+  --wait \
+  --timeout 10m
+```
+
+Instalação do Ingress Gateway:
+
+```bash
+helm upgrade --install istio-ingressgateway istio/gateway \
+  -n istio-ingress \
+  -f k8s/istio/ingressgateway-values-aws-public-free-tier.yaml
+```
+
+Validação do control plane:
 
 ```bash
 kubectl -n istio-system get pods
-kubectl -n istio-ingress get pods
-kubectl -n istio-ingress get svc
 ```
 
-O `istio-ingressgateway` foi exposto como `NodePort` no ambiente local.
-
-Portas configuradas:
+Resultado:
 
 ```text
-HTTP: 30080
-HTTPS: 30443
-Status: 32021
+NAME                      READY   STATUS    RESTARTS   AGE
+istiod-5dd7777b6f-8q6ln   1/1     Running   0          35m
+```
+
+Validação do ingress gateway:
+
+```bash
+kubectl -n istio-ingress get deploy,pod,svc -o wide
+```
+
+Resultado:
+
+```text
+deployment.apps/istio-ingressgateway   1/1
+pod/istio-ingressgateway               1/1 Running
+service/istio-ingressgateway           LoadBalancer
+```
+
+Load Balancer público criado:
+
+```text
+a2b994de2f99040e8b9f347aac380514-467497939.us-east-1.elb.amazonaws.com
 ```
 
 ---
 
-## 14. Exposição HTTP via Istio
+## Gateway e VirtualService
 
-A aplicação fica acessível por:
+A aplicação foi exposta via recursos do Istio:
 
 ```text
-http://192.168.0.20:30080
+Gateway
+VirtualService
 ```
 
-Testes:
+Validação:
 
 ```bash
-curl http://192.168.0.20:30080/
-curl http://192.168.0.20:30080/version
-curl http://192.168.0.20:30080/health/ready
+kubectl -n nextfit get gateways.networking.istio.io
 ```
 
-O fluxo é:
+Resultado:
 
 ```text
-192.168.0.20:30080
-  -> istio-ingressgateway
-  -> Gateway
-  -> VirtualService
-  -> Service nextfit-app
-  -> Pods da aplicação
+NAME              AGE
+nextfit-gateway   11m
+```
+
+Validação do VirtualService:
+
+```bash
+kubectl -n nextfit get virtualservices.networking.istio.io
+```
+
+Resultado:
+
+```text
+NAME          GATEWAYS              HOSTS   AGE
+nextfit-app   ["nextfit-gateway"]   ["*"]   11m
+```
+
+Fluxo do roteamento:
+
+```text
+Istio Gateway
+  ↓
+VirtualService nextfit-app
+  ↓
+Service nextfit-app.nextfit.svc.cluster.local
+  ↓
+Pod nextfit-app
 ```
 
 ---
 
-## 15. Recursos Istio da aplicação
+## Endpoint público
 
-Validar Gateway e VirtualService:
-
-```bash
-kubectl -n nextfit get gateway
-kubectl -n nextfit get virtualservice
-```
-
-O `Gateway` define que o Istio aceita tráfego HTTP na porta 80.
-
-O `VirtualService` define que as requisições com prefixo `/` devem ser encaminhadas para o Service interno da aplicação:
+Endpoint público da aplicação:
 
 ```text
-nextfit-app.nextfit.svc.cluster.local
+http://a2b994de2f99040e8b9f347aac380514-467497939.us-east-1.elb.amazonaws.com
+```
+
+Teste do endpoint `/`:
+
+```bash
+curl -v http://a2b994de2f99040e8b9f347aac380514-467497939.us-east-1.elb.amazonaws.com/
+```
+
+Resultado:
+
+```http
+HTTP/1.1 200 OK
+server: istio-envoy
+content-type: application/json; charset=utf-8
+```
+
+Resposta:
+
+```json
+{
+  "service": "nextfit-challenge",
+  "status": "running",
+  "environment": "Production",
+  "timestampUtc": "2026-07-16T06:04:47.6581653Z"
+}
+```
+
+Teste do endpoint `/version`:
+
+```bash
+curl -v http://a2b994de2f99040e8b9f347aac380514-467497939.us-east-1.elb.amazonaws.com/version
+```
+
+Resultado:
+
+```http
+HTTP/1.1 200 OK
+server: istio-envoy
+content-type: application/json; charset=utf-8
+```
+
+Resposta:
+
+```json
+{
+  "application": "NextFit.App",
+  "framework": ".NET 8",
+  "version": "0.1.0"
+}
+```
+
+Teste do endpoint `/health/ready`:
+
+```bash
+curl -v http://a2b994de2f99040e8b9f347aac380514-467497939.us-east-1.elb.amazonaws.com/health/ready
+```
+
+Resultado:
+
+```http
+HTTP/1.1 200 OK
+server: istio-envoy
+content-type: text/plain
+```
+
+Resposta:
+
+```text
+Healthy
+```
+
+O header abaixo confirma que o tráfego passou pelo Istio Ingress Gateway:
+
+```http
+server: istio-envoy
 ```
 
 ---
 
-## 16. Troubleshooting
+## Evidências do cluster
 
-Ver pods:
+Nodes EKS:
 
-```bash
-kubectl -n nextfit get pods -o wide
+```text
+NAME                           STATUS   ROLES    VERSION
+ip-10-42-20-38.ec2.internal    Ready    <none>   v1.33.13-eks-8f14419
+ip-10-42-21-208.ec2.internal   Ready    <none>   v1.33.13-eks-8f14419
 ```
 
-Ver logs da aplicação:
+Istio control plane:
 
-```bash
-kubectl -n nextfit logs deployment/nextfit-app -c app
+```text
+NAME                      READY   STATUS    RESTARTS
+istiod-5dd7777b6f-8q6ln   1/1     Running   0
 ```
 
-Ver logs do sidecar Istio:
+Istio ingress gateway:
 
-```bash
-kubectl -n nextfit logs POD_NAME -c istio-proxy
+```text
+deployment.apps/istio-ingressgateway   1/1
+pod/istio-ingressgateway               1/1 Running
+service/istio-ingressgateway           LoadBalancer
 ```
 
-Ver eventos:
+Aplicação:
 
-```bash
-kubectl -n nextfit get events --sort-by=.lastTimestamp
+```text
+deployment.apps/nextfit-app   1/1
+pod/nextfit-app               1/1 Running
+service/nextfit-app           ClusterIP
 ```
 
-Ver detalhes de um pod:
+Imagem da aplicação no EKS:
 
-```bash
-kubectl -n nextfit describe pod POD_NAME
+```text
+879816410626.dkr.ecr.us-east-1.amazonaws.com/nextfit-challenge-dev/nextfit-app:0.1.0
 ```
 
-Ver Service e endpoints:
+Endpoint da aplicação:
+
+```text
+nextfit-app   10.42.21.197:8080
+```
+
+---
+
+## Observações sobre estabilidade do Load Balancer
+
+Durante os testes, o Load Balancer público resolveu para mais de um IP. Em alguns momentos, um dos caminhos apresentou timeout temporário enquanto o outro respondia corretamente.
+
+Foi validado que os endpoints funcionaram publicamente com:
+
+```text
+HTTP/1.1 200 OK
+server: istio-envoy
+```
+
+Para estabilizar os testes em ambiente Free Tier com apenas uma réplica do ingress gateway, foi utilizado o IP saudável com `curl --connect-to`, preservando o header `Host` original:
 
 ```bash
-kubectl -n nextfit get svc
-kubectl -n nextfit get endpoints nextfit-app
+HOST="a2b994de2f99040e8b9f347aac380514-467497939.us-east-1.elb.amazonaws.com"
+
+curl -v --connect-to "$HOST:80:52.203.24.112:80" "http://$HOST/"
+curl -v --connect-to "$HOST:80:52.203.24.112:80" "http://$HOST/version"
+curl -v --connect-to "$HOST:80:52.203.24.112:80" "http://$HOST/health/ready"
+```
+
+Essa validação retornou `200 OK` para os três endpoints.
+
+Em um ambiente produtivo, a recomendação seria utilizar mais réplicas do ingress gateway, nodes maiores, configuração de alta disponibilidade e ajustes específicos no Load Balancer.
+
+---
+
+## Segurança
+
+Boas práticas aplicadas:
+
+```text
+- execução do container como usuário não-root
+- readOnlyRootFilesystem
+- allowPrivilegeEscalation: false
+- drop de Linux capabilities
+- uso de ECR privado
+- scan on push habilitado no ECR
+- workloads em subnets privadas
+- exposição externa centralizada pelo Istio Ingress Gateway
+```
+
+Pontos recomendados para produção:
+
+```text
+- HTTPS no Istio Gateway
+- TLS termination com certificado válido
+- secrets gerenciados por AWS Secrets Manager ou External Secrets Operator
+- IAM Roles for Service Accounts ou EKS Pod Identity quando necessário
+- NetworkPolicies
+- logs centralizados
+- métricas e tracing
+- Terraform state remoto com S3 e DynamoDB Lock
+```
+
+---
+
+## Comandos úteis
+
+Ver nodes:
+
+```bash
+kubectl get nodes -o wide
+```
+
+Ver aplicação:
+
+```bash
+kubectl -n nextfit get deploy,pod,svc -o wide
+```
+
+Ver Istio:
+
+```bash
+kubectl -n istio-system get pods
+kubectl -n istio-ingress get deploy,pod,svc -o wide
 ```
 
 Ver Gateway e VirtualService:
 
 ```bash
-kubectl -n nextfit describe gateway
-kubectl -n nextfit describe virtualservice
+kubectl -n nextfit get gateways.networking.istio.io
+kubectl -n nextfit get virtualservices.networking.istio.io
 ```
 
-Ver logs do Istio Ingress Gateway:
+Ver endpoint interno:
 
 ```bash
-kubectl -n istio-ingress logs deployment/istio-ingressgateway
+kubectl -n nextfit get endpoints nextfit-app
+```
+
+Testar endpoint público:
+
+```bash
+curl http://a2b994de2f99040e8b9f347aac380514-467497939.us-east-1.elb.amazonaws.com/
+curl http://a2b994de2f99040e8b9f347aac380514-467497939.us-east-1.elb.amazonaws.com/version
+curl http://a2b994de2f99040e8b9f347aac380514-467497939.us-east-1.elb.amazonaws.com/health/ready
 ```
 
 ---
 
-## 17. Rollout e rollback
+## Limpeza dos recursos
 
-Ver status do rollout:
+Atenção: o ambiente AWS pode gerar custo, principalmente por causa de EKS, EC2, NAT Gateway e Load Balancer.
+
+Remover aplicação:
 
 ```bash
-kubectl -n nextfit rollout status deployment/nextfit-app
+helm uninstall nextfit-app -n nextfit || true
 ```
 
-Ver histórico:
+Remover Istio Gateway:
 
 ```bash
-kubectl -n nextfit rollout history deployment/nextfit-app
+helm uninstall istio-ingressgateway -n istio-ingress || true
 ```
 
-Rollback via Kubernetes:
+Remover Istio control plane:
 
 ```bash
-kubectl -n nextfit rollout undo deployment/nextfit-app
+helm uninstall istiod -n istio-system || true
+helm uninstall istio-base -n istio-system || true
 ```
 
-Rollback via Helm:
+Remover namespaces:
 
 ```bash
-helm history nextfit-app -n nextfit
-helm rollback nextfit-app REVISION -n nextfit
+kubectl delete namespace nextfit --ignore-not-found=true
+kubectl delete namespace istio-ingress --ignore-not-found=true
+kubectl delete namespace istio-system --ignore-not-found=true
+```
+
+Destruir infraestrutura AWS:
+
+```bash
+cd infra/infra/aws
+terraform destroy
 ```
 
 ---
 
-## 18. Decisões técnicas
+## Pontos de melhoria
 
-### Por que ASP.NET Core Minimal API?
-
-O foco do desafio é infraestrutura, Kubernetes e operação. Por isso, a aplicação foi mantida simples, com endpoints suficientes para validar funcionamento, versão e saúde.
-
-### Por que Docker multi-stage?
-
-Para separar build e runtime. A imagem final contém apenas o necessário para executar a aplicação, sem SDK e ferramentas de compilação.
-
-### Por que Kubernetes?
-
-O Kubernetes permite declarar o estado desejado da aplicação, controlar réplicas, realizar rolling updates, aplicar probes, controlar recursos e padronizar deploy.
-
-### Por que Helm?
-
-O Helm deixa os manifests parametrizáveis e reutilizáveis. A mesma estrutura pode ser usada em ambiente local e cloud, alterando apenas os valores.
-
-### Por que HPA?
-
-Para demonstrar elasticidade horizontal. A aplicação pode aumentar ou reduzir réplicas com base em consumo de CPU.
-
-### Por que PDB?
-
-Para proteger disponibilidade durante interrupções voluntárias, como manutenção ou drain de node.
-
-### Por que Istio?
-
-O Istio foi usado como diferencial para separar a camada de entrada da aplicação. O tráfego externo entra pelo Istio Ingress Gateway, e o roteamento é controlado por Gateway e VirtualService.
-
-Essa base permite evoluções como:
-
-* mTLS.
-* retries.
-* timeouts.
-* circuit breaking.
-* traffic shifting.
-* canary release.
-* políticas de autorização.
-
----
-
-## 19. Limitações do ambiente local
-
-A versão atual roda em K3s local e possui algumas limitações:
-
-* Não possui domínio público.
-* Não possui TLS configurado.
-* Não usa Load Balancer cloud.
-* A imagem é importada manualmente no containerd do K3s.
-* Não há pipeline CI/CD.
-* Não há observabilidade completa com Prometheus/Grafana.
-* Não há gerenciamento externo de secrets.
-* Não há provisionamento cloud nesta etapa.
-
-Essas limitações serão tratadas ou documentadas na evolução para AWS.
-
----
-
-## 20. Próxima etapa — AWS
-
-A próxima etapa será provisionar a infraestrutura na AWS usando Terraform.
-
-A arquitetura planejada para AWS é:
+Melhorias futuras possíveis:
 
 ```text
-Internet
-  |
-  v
-AWS Load Balancer
-  |
-  v
-Istio Ingress Gateway
-  |
-  v
-Gateway / VirtualService
-  |
-  v
-Service ClusterIP
-  |
-  v
-Pods ASP.NET Core no EKS
-```
-
-Recursos planejados:
-
-```text
-VPC
-Subnets públicas
-Subnets privadas
-EKS
-Managed Node Group
-ECR
-Istio via Helm
-Metrics Server
-Deploy da aplicação via Helm
-```
-
-Fluxo esperado:
-
-```text
-Terraform cria infraestrutura AWS.
-Docker build gera a imagem da aplicação.
-Imagem é enviada para o ECR.
-Helm faz deploy da aplicação no EKS.
-Istio expõe a aplicação publicamente.
-```
-
-Comandos previstos:
-
-```bash
-cd infra/aws
-terraform init
-terraform validate
-terraform plan
-terraform apply
-```
-
-Configurar kubeconfig:
-
-```bash
-aws eks update-kubeconfig \
-  --region REGION \
-  --name CLUSTER_NAME
-```
-
-Build e push da imagem:
-
-```bash
-docker build -t nextfit-app:0.1.0 ./app/NextFit.App
-docker tag nextfit-app:0.1.0 ECR_REPOSITORY_URL:0.1.0
-docker push ECR_REPOSITORY_URL:0.1.0
-```
-
-Deploy:
-
-```bash
-helm upgrade --install nextfit-app k8s/helm/nextfit-app \
-  -n nextfit \
-  --set image.repository=ECR_REPOSITORY_URL \
-  --set image.tag=0.1.0 \
-  --set image.pullPolicy=IfNotPresent
+- GitHub Actions para build e push automático da imagem
+- deploy automatizado via pipeline
+- remote state no Terraform
+- HTTPS no Istio Gateway
+- observabilidade com Prometheus e Grafana
+- logs centralizados
+- tracing distribuído
+- HPA habilitado em ambiente com sizing adequado
+- múltiplas réplicas da aplicação
+- múltiplas réplicas do ingressgateway
+- PodDisruptionBudget em produção
 ```
 
 ---
 
-## 21. Melhorias futuras
+## Resumo técnico
 
-Para uma versão mais próxima de produção, eu evoluiria com:
-
-* Terraform remote state em S3.
-* Lock de state com DynamoDB.
-* TLS com ACM.
-* DNS com Route53.
-* WAF.
-* Observabilidade com Prometheus, Grafana e Loki ou CloudWatch.
-* External Secrets Operator com AWS Secrets Manager.
-* Pipeline CI/CD com GitHub Actions.
-* OIDC entre GitHub Actions e AWS.
-* Canary release com Istio.
-* mTLS dentro da malha.
-* Network Policies.
-* Cluster Autoscaler ou Karpenter.
-* Separação de ambientes: dev, staging e prod.
-
----
-
-## 22. Como explicar a solução
-
-A solução foi construída de forma incremental.
-
-Primeiro validei a aplicação localmente. Depois criei o Dockerfile e rodei a aplicação em container. Em seguida, publiquei a aplicação em Kubernetes usando Deployment e Service. Depois evoluí os manifests para Helm, adicionando probes, requests, limits, securityContext, HPA e PDB.
-
-Por fim, adicionei Istio para expor a aplicação por meio de Gateway e VirtualService. No ambiente local, o Istio Ingress Gateway foi exposto via NodePort na porta 30080. Na AWS, a ideia é manter a aplicação como ClusterIP e expor o Istio Ingress Gateway via Load Balancer.
-
-A solução não tenta ser excessivamente complexa. Ela prioriza clareza, funcionamento e evolução progressiva para um ambiente cloud mais robusto.
-
----
-
-## 23. Status atual
-
-Funcional no ambiente local:
+Este projeto entrega:
 
 ```text
-Aplicação ASP.NET Core
-Dockerfile
-K3s
-Helm Chart
-Deployment
-Service ClusterIP
-LivenessProbe
-ReadinessProbe
-Requests/Limits
-SecurityContext
-HPA
-PDB
-Istio Gateway
-VirtualService
-Acesso via http://192.168.0.20:30080
+- aplicação ASP.NET Core 8
+- Dockerfile multi-stage
+- publicação da imagem no Amazon ECR
+- infraestrutura AWS com Terraform
+- cluster EKS gerenciado
+- deploy Kubernetes com Helm
+- Service interno ClusterIP
+- health checks com liveness/readiness
+- requests e limits
+- Istio instalado no cluster
+- Istio Ingress Gateway
+- Gateway e VirtualService
+- endpoint público via AWS Load Balancer
 ```
 
-Pendente para a entrega final:
-
-```text
-Terraform AWS
-EKS
-ECR
-Push da imagem para registry cloud
-Deploy no EKS
-Exposição pública via Load Balancer/Istio
-Documentação final com outputs reais da AWS
-```
+O endpoint público foi validado com sucesso e respondeu `200 OK` passando pelo Istio Envoy, confirmando o funcionamento da arquitetura proposta.

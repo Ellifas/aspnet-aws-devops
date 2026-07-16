@@ -2,12 +2,12 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: nextfit-app
+  name: {{ include "nextfit-app.fullname" . }}
   labels:
-    app: nextfit-app
+    {{- include "nextfit-app.labels" . | nindent 4 }}
 spec:
   minAvailable: {{ .Values.pdb.minAvailable }}
   selector:
     matchLabels:
-      app: nextfit-app
+      {{- include "nextfit-app.selectorLabels" . | nindent 6 }}
 {{- end }}

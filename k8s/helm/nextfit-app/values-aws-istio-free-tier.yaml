@@ -1,0 +1,26 @@
+replicaCount: 1
+
+image:
+  repository: 879816410626.dkr.ecr.us-east-1.amazonaws.com/nextfit-challenge-dev/nextfit-app
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+containerPort: 8080
+
+hpa:
+  enabled: false
+
+pdb:
+  enabled: false
+
+istio:
+  enabled: true
+  host: "*"
+  gatewayName: nextfit-gateway
+  gatewaySelector:
+    istio: ingressgateway

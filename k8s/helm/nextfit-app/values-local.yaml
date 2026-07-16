@@ -1,0 +1,8 @@
+image: 
+  repository: localhost/nextfit-app
+  tag: local
+  pullPolicy: Never
+
+istio:   
+  enabled: true
+  host: '*'

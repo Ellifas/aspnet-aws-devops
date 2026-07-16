@@ -2,9 +2,9 @@
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
-  name: nextfit-app
+  name: {{ include "nextfit-app.fullname" . }}
   labels:
-    app: nextfit-app
+    {{- include "nextfit-app.labels" . | nindent 4 }}
 spec:
   hosts:
     - {{ .Values.istio.host | quote }}
@@ -16,7 +16,7 @@ spec:
             prefix: /
       route:
         - destination:
-            host: nextfit-app.nextfit.svc.cluster.local
+            host: {{ include "nextfit-app.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
             port:
               number: {{ .Values.service.port }}
 {{- end }}
